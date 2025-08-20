@@ -232,7 +232,7 @@ func main() {
 	// Create business logic instance
 	generator := NewDobbleGenerator()
 	
-	// Setup cards list
+	// Setup cards list - simple approach with full refresh
 	ui.cardsList = widget.NewList(
 		func() int { return len(ui.cardItems) },
 		func() fyne.CanvasObject {
@@ -246,20 +246,24 @@ func main() {
 				label := hbox.Objects[0].(*widget.Label)
 				checkbox := hbox.Objects[1].(*widget.Check)
 				
-				cardItem := &ui.cardItems[id]
+				cardItem := ui.cardItems[id]
 				
+				// Update display
 				if cardItem.Processed {
 					label.SetText(fmt.Sprintf("Card %d", id+1))
 				} else {
 					label.SetText(fmt.Sprintf("Card %d: %s", id+1, formatCard(cardItem.Card)))
 				}
 				
+				// Set checkbox without callback to avoid recursion
+				checkbox.OnChanged = nil
 				checkbox.SetChecked(cardItem.Processed)
+				
+				// Set callback that updates state and refreshes entire list
 				checkbox.OnChanged = func(checked bool) {
-					cardItem.Processed = checked
-					go func() {
-						ui.cardsList.Refresh()
-					}()
+					ui.cardItems[id].Processed = checked
+					// Force full refresh of the list
+					ui.cardsList.Refresh()
 				}
 			}
 		},
