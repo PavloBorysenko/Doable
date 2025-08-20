@@ -212,14 +212,10 @@ func formatCard(card []int) string {
 	return "[" + strings.Join(strSymbols, ", ") + "]"
 }
 
-func main() {
-	myApp := app.New()
-	myWindow := myApp.NewWindow("Dobble Card Generator")
-	myWindow.Resize(fyne.NewSize(WindowWidth, WindowHeight))
-
-	// Create UI instance
+// NewAppUI creates and initializes UI components
+func NewAppUI(window fyne.Window) *AppUI {
 	ui := &AppUI{
-		window:              myWindow,
+		window:              window,
 		symbolsPerCardEntry: widget.NewEntry(),
 		resultLabel:         widget.NewLabel("Enter the number of images per card. Supported values: 2, 3, 4, 5, 6, 8, 9..."),
 		successLabel:        widget.NewLabel(""),
@@ -229,10 +225,11 @@ func main() {
 	ui.symbolsPerCardEntry.SetPlaceHolder("Enter the number of images per card")
 	ui.resultLabel.Wrapping = fyne.TextWrapWord
 	
-	// Create business logic instance
-	generator := NewDobbleGenerator()
-	
-	// Setup cards list - simple approach with full refresh
+	return ui
+}
+
+// setupCardsList creates and configures the cards list widget
+func (ui *AppUI) setupCardsList() {
 	ui.cardsList = widget.NewList(
 		func() int { return len(ui.cardItems) },
 		func() fyne.CanvasObject {
@@ -241,88 +238,116 @@ func main() {
 			return container.NewHBox(label, checkbox)
 		},
 		func(id widget.ListItemID, item fyne.CanvasObject) {
-			if id < len(ui.cardItems) {
-				hbox := item.(*fyne.Container)
-				label := hbox.Objects[0].(*widget.Label)
-				checkbox := hbox.Objects[1].(*widget.Check)
-				
-				cardItem := ui.cardItems[id]
-				
-				// Update display
-				if cardItem.Processed {
-					label.SetText(fmt.Sprintf("Card %d", id+1))
-				} else {
-					label.SetText(fmt.Sprintf("Card %d: %s", id+1, formatCard(cardItem.Card)))
-				}
-				
-				// Set checkbox without callback to avoid recursion
-				checkbox.OnChanged = nil
-				checkbox.SetChecked(cardItem.Processed)
-				
-				// Set callback that updates state and refreshes entire list
-				checkbox.OnChanged = func(checked bool) {
-					ui.cardItems[id].Processed = checked
-					// Force full refresh of the list
-					ui.cardsList.Refresh()
-				}
-			}
+			ui.updateListItem(id, item)
 		},
 	)
+}
 
-	// Generate button with simplified logic
-	generateButton := widget.NewButton("Generate Cards", func() {
-		// Validate input
-		symbolsPerCard, err := validateInput(ui.symbolsPerCardEntry.Text)
-		if err != nil {
-			ui.showError(err.Error())
-			return
-		}
-
-		// Show progress
-		ui.resultLabel.SetText("Generating cards...")
-		ui.successLabel.SetText("")
-		ui.errorLabel.SetText("")
-		
-		// Generate cards
-		cards := generator.Generate(symbolsPerCard)
-		totalSymbols := generator.GetTotalSymbols()
-		
-		if len(cards) == 0 {
-			ui.showError("Failed to generate cards")
-			return
-		}
-		
-		// Validate and filter cards
-		allValid := validateCards(cards)
-		displayCards := cards
-		if !allValid {
-			displayCards = filterValidCards(cards)
-		}
-		
-		// Create card items
-		ui.cardItems = make([]CardItem, len(displayCards))
-		for i, card := range displayCards {
-			ui.cardItems[i] = CardItem{
-				Card:      card,
-				Processed: false,
-			}
-		}
-		
-		// Show results
-		if allValid {
-			ui.showSuccess(fmt.Sprintf("Generated %d cards (%d symbols(images) per card, %d total symbols(images))", len(cards), symbolsPerCard, totalSymbols))
-		} else {
-			ui.showError(fmt.Sprintf("Showing %d of %d correct cards", len(displayCards), len(cards)))
-		}
-		
-		// Show mathematical formula
-		mathText := fmt.Sprintf("Formula: n=%d, symbols=n²+n+1=%d, cards=%d", symbolsPerCard-1, totalSymbols, totalSymbols)
-		ui.resultLabel.SetText(mathText)
-
+// updateListItem handles the update logic for a single list item
+func (ui *AppUI) updateListItem(id widget.ListItemID, item fyne.CanvasObject) {
+	if id >= len(ui.cardItems) {
+		return
+	}
+	
+	hbox := item.(*fyne.Container)
+	label := hbox.Objects[0].(*widget.Label)
+	checkbox := hbox.Objects[1].(*widget.Check)
+	
+	cardItem := ui.cardItems[id]
+	
+	// Update display
+	if cardItem.Processed {
+		label.SetText(fmt.Sprintf("Card %d", id+1))
+	} else {
+		label.SetText(fmt.Sprintf("Card %d: %s", id+1, formatCard(cardItem.Card)))
+	}
+	
+	// Set checkbox without callback to avoid recursion
+	checkbox.OnChanged = nil
+	checkbox.SetChecked(cardItem.Processed)
+	
+	// Set callback that updates state and refreshes entire list
+	checkbox.OnChanged = func(checked bool) {
+		ui.cardItems[id].Processed = checked
 		ui.cardsList.Refresh()
-	})
+	}
+}
 
-	// Create UI layout
+// createGenerateButton creates the generate button with its logic
+func (ui *AppUI) createGenerateButton(generator *DobbleGenerator) *widget.Button {
+	return widget.NewButton("Generate Cards", func() {
+		ui.handleGenerate(generator)
+	})
+}
+
+// handleGenerate processes the card generation logic
+func (ui *AppUI) handleGenerate(generator *DobbleGenerator) {
+	// Validate input
+	symbolsPerCard, err := validateInput(ui.symbolsPerCardEntry.Text)
+	if err != nil {
+		ui.showError(err.Error())
+		return
+	}
+
+	// Show progress
+	ui.showProgress()
+	
+	// Generate and process cards
+	cards := generator.Generate(symbolsPerCard)
+	if len(cards) == 0 {
+		ui.showError("Failed to generate cards")
+		return
+	}
+	
+	// Process results
+	ui.processGenerationResults(cards, symbolsPerCard, generator.GetTotalSymbols())
+}
+
+// showProgress displays the progress message
+func (ui *AppUI) showProgress() {
+	ui.resultLabel.SetText("Generating cards...")
+	ui.successLabel.SetText("")
+	ui.errorLabel.SetText("")
+}
+
+// processGenerationResults handles the results of card generation
+func (ui *AppUI) processGenerationResults(cards [][]int, symbolsPerCard, totalSymbols int) {
+	// Validate and filter cards
+	allValid := validateCards(cards)
+	displayCards := cards
+	if !allValid {
+		displayCards = filterValidCards(cards)
+	}
+	
+	// Create card items
+	ui.cardItems = make([]CardItem, len(displayCards))
+	for i, card := range displayCards {
+		ui.cardItems[i] = CardItem{
+			Card:      card,
+			Processed: false,
+		}
+	}
+	
+	// Show results
+	ui.displayResults(allValid, cards, displayCards, symbolsPerCard, totalSymbols)
+	ui.cardsList.Refresh()
+}
+
+// displayResults shows the generation results to the user
+func (ui *AppUI) displayResults(allValid bool, allCards, displayCards [][]int, symbolsPerCard, totalSymbols int) {
+	if allValid {
+		ui.showSuccess(fmt.Sprintf("Generated %d cards (%d symbols(images) per card, %d total symbols(images))", len(allCards), symbolsPerCard, totalSymbols))
+	} else {
+		ui.showError(fmt.Sprintf("Showing %d of %d correct cards", len(displayCards), len(allCards)))
+	}
+	
+	// Show mathematical formula
+	mathText := fmt.Sprintf("Formula: n=%d, symbols=n²+n+1=%d, cards=%d", symbolsPerCard-1, totalSymbols, totalSymbols)
+	ui.resultLabel.SetText(mathText)
+}
+
+// createLayout creates the main UI layout
+func (ui *AppUI) createLayout(generateButton *widget.Button) fyne.CanvasObject {
 	form := container.NewVBox(
 		widget.NewLabel("Dobble Card Generator"),
 		widget.NewCard("Instructions", "Enter the number of images per card. The application will automatically calculate the optimal number of symbols and generate all cards.", widget.NewLabel("")),
@@ -341,8 +366,25 @@ func main() {
 	cardsScroll := container.NewScroll(ui.cardsList)
 	cardsScroll.SetMinSize(fyne.NewSize(0, CardsListHeight))
 
-	content := container.NewBorder(form, nil, nil, nil, cardsScroll)
+	return container.NewBorder(form, nil, nil, nil, cardsScroll)
+}
+
+func main() {
+	// Initialize application
+	myApp := app.New()
+	myWindow := myApp.NewWindow("Dobble Card Generator")
+	myWindow.Resize(fyne.NewSize(WindowWidth, WindowHeight))
+
+	// Create components
+	ui := NewAppUI(myWindow)
+	generator := NewDobbleGenerator()
 	
+	// Setup UI components
+	ui.setupCardsList()
+	generateButton := ui.createGenerateButton(generator)
+	content := ui.createLayout(generateButton)
+	
+	// Run application
 	myWindow.SetContent(content)
 	myWindow.ShowAndRun()
 } 
